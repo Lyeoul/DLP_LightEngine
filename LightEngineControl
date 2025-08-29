@@ -1,0 +1,137 @@
+Appendix-1: SPI READ MASK FILE SAMPLE CODE
+
+/** ********************************
+Application main() function
+*** ******************************** */
+
+int _tmain(int argc, _TCHAR* argv[]){
+
+  int len = 0;
+  int addr = 0x10000; //PNG file starting address
+  char header_buf[] = { 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}; //4bytes file length and 4bytes file check sum
+  char *png_buf = NULL;
+  int status;
+  UINT32 png_len = 0;
+  UINT32 png_cksum = 0;
+
+  //Reading PNG file Lenght and check sum from SPI Flash
+  status = FlashBlockRead(addr, 8, header_buf);
+  if (status != CY_SUCCESS){
+    printf("\nFailed to Read.");
+    return -1;
+  }
+
+  png_len = header_buf[0] & 0xff | header_buf[1] << 8 & 0xff00 | header_buf[2] << 16 & 0xff0000 | header_buf[3] << 24 & 0xff000000;
+  png_cksum = header_buf[4] & 0xff | header_buf[5] << 8 & 0xff00 | header_buf[6] << 16 & 0xff0000 | header_buf[7] << 24 & 0xff000000;
+
+  //Reading PNG file from SPI Flash
+  png_buf = new char[png_len];
+  status = FlashBlockRead(addr+8, png_len, png_buf);
+  if (status != CY_SUCCESS){ 
+    printf("\nFailed to Read.");
+    return -1;
+  }
+
+  UINT32 cksum = 0;
+
+  for (int i = 0; i < png_len; i++){
+    cksum += png_buf[i] & 0xff;
+  }
+  if (cksum != png_cksum){
+    printf("\nFile check sum is NG.");
+    return -1;
+  }
+  else
+  printf("\nFile check sum is OK."); //Saving the PNG file
+  
+  FILE *pFile;
+  pFile = fopen("readflash.png", "wb");
+
+  if (NULL == pFile){
+    printf("file open failure!\n");
+    return -1;
+  }
+  else{
+    fwrite(png_buf, 1, png_len, pFile);
+  }
+
+  fclose(pFile);
+  delete[] png_buf;
+  return 0;
+}
+
+CY_RETURN_STATUS FlashBlockRead(int address, int len, char *buf)
+{
+  int BlockSize = 0x1000; //Block read 4KB size
+  unsigned char wbuffer[0x1004], rbuffer[0x1004]; //array size is equal to
+  BlockSize+4
+  CY_DEVICE_SERIAL_BLOCK dev = SerialBlock_SCB1;
+  //Assmumptions:
+  //SCB1 is configured as SPI
+  int deviceNumber = FindDeviceAtSCB(dev);
+  CY_DATA_BUFFER cyDatabufferWrite, cyDatabufferRead;
+  CY_RETURN_STATUS rStatus;
+  int interfaceNum = 0;
+  int cWriteSize, cReadSize;
+  int str_addr = address;
+  printf("Opening SPI device with device number %d...\n", deviceNumber);
+  rStatus = CyOpen(deviceNumber, interfaceNum, &cyHandle);
+
+  if (rStatus != CY_SUCCESS){
+    printf("SPI Device open failed.\n");
+    return rStatus;
+  }
+
+  while (len > 0){
+    printf("Read data from start address :0x%X \n", address);
+    wbuffer[0] = READ_DATA;
+    wbuffer[1] = (address >> 16 & 0xff);
+    wbuffer[2] = (address >> 8 & 0xff);
+    wbuffer[3] = (address & 0xff);
+    cWriteSize = 4;
+    if (len > BlockSize)
+    cReadSize = BlockSize;
+    else
+    cReadSize = len;
+    //SPI uses a single CySpiReadWrite to perform both read and write
+    //and flush operations.
+    cyDatabufferWrite.buffer = wbuffer;
+    cyDatabufferWrite.length = 4 + cReadSize; //4 bytes command + 256 bytes page size
+    cyDatabufferRead.buffer = rbuffer;
+    cyDatabufferRead.length = 4 + cReadSize;
+    // As per the Flash datasheet we need to perform simeltanious read and write
+    // to do read/write operation on Flash.
+    // In this case cyDatabufferRead contains data pushed out by Flash and not real data.
+    rStatus = CySpiReadWrite(cyHandle, &cyDatabufferRead, &cyDatabufferWrite, 5000);
+
+    if (rStatus != CY_SUCCESS){
+      printf("Error in doing SPI data write :0x%X \n", cyDatabufferWrite.transferCount);
+      return rStatus;
+    }
+
+    for (int i = 0; i < cReadSize; i++)
+    buf[address - str_addr + i] = rbuffer[cWriteSize + i];
+    //Wait for Flash active state..."
+    rStatus = cySPIWaitForIdle(cyHandle);
+    if (rStatus){
+      printf("Error in Waiting for Flash active state:0x%X \n", rStatus);
+      return rStatus;
+    }
+
+    address += BlockSize;
+    if (len > BlockSize)
+      len -= BlockSize;
+    else
+      len = 0;
+  }
+
+  printf("Closeing SPI device...\n");
+  rStatus = CyClose(cyHandle);
+  if (rStatus != CY_SUCCESS){
+    printf("SPI Device close failed.\n");
+    return rStatus;
+  }
+
+  printf("Flash Read Done ...");
+  return CY_SUCCESS;
+}
