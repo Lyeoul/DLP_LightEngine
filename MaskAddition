@@ -1,9 +1,3 @@
-Appendix-1: SPI READ MASK FILE SAMPLE CODE
-
-/** ********************************
-Application main() function
-*** ******************************** */
-
 int _tmain(int argc, _TCHAR* argv[]){
 
   int len = 0;
@@ -43,7 +37,7 @@ int _tmain(int argc, _TCHAR* argv[]){
   }
   else
   printf("\nFile check sum is OK."); //Saving the PNG file
-  
+
   FILE *pFile;
   pFile = fopen("readflash.png", "wb");
 
